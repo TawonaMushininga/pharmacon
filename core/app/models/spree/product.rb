@@ -24,6 +24,7 @@ module Spree
     include ProductScopes
     include MultiStoreResource
     include TranslatableResource
+    include TranslatableResourceScopes
     include MemoizedData
     include Metadata
     if defined?(Spree::Webhooks)
@@ -38,8 +39,13 @@ module Spree
                           purchasable? in_stock? backorderable?]
 
     TRANSLATABLE_FIELDS = %i[name description slug meta_description meta_keywords meta_title].freeze
-    translates *TRANSLATABLE_FIELDS
-    Product::Translation.class_eval { acts_as_paranoid }
+    translates(*TRANSLATABLE_FIELDS)
+
+    self::Translation.class_eval do
+      acts_as_paranoid
+      # deleted translation values also need to be accessible for index views listing deleted resources
+      default_scope { unscope(where: :deleted_at) }
+    end
 
     friendly_id :slug_candidates, use: [:history, :mobility]
     acts_as_paranoid
@@ -310,14 +316,26 @@ module Spree
     end
 
     def property(property_name)
-      product_properties.joins(:property).find_by(spree_properties: { name: property_name }).try(:value)
+      product_properties.joins(:property).
+        join_translation_table(Property).
+        find_by(Property.translation_table_alias => { name: property_name }).try(:value)
     end
 
     def set_property(property_name, property_value, property_presentation = property_name)
       ApplicationRecord.transaction do
-        # Works around spree_i18n #301
-        property = Property.create_with(presentation: property_presentation).find_or_create_by(name: property_name)
-        product_property = ProductProperty.where(product: self, property: property).first_or_initialize
+        # Manual first_or_create to work around Mobility bug
+        property = if Property.where(name: property_name).exists?
+                     Property.where(name: property_name).first
+                   else
+                     Property.create(name: property_name, presentation: property_presentation)
+                   end
+
+        product_property = if ProductProperty.where(product: self, property: property).exists?
+                             ProductProperty.where(product: self, property: property).first
+                           else
+                             ProductProperty.create(product: self, property: property)
+                           end
+
         product_property.value = property_value
         product_property.save!
       end
@@ -341,11 +359,16 @@ module Spree
     end
 
     def brand
-      @brand ||= taxons.joins(:taxonomy).find_by(spree_taxonomies: { name: Spree.t(:taxonomy_brands_name) })
+      @brand ||= taxons.joins(:taxonomy).
+                 join_translation_table(Taxonomy).
+                 find_by(Taxonomy.translation_table_alias => { name: Spree.t(:taxonomy_brands_name) })
     end
 
     def category
-      @category ||= taxons.joins(:taxonomy).order(depth: :desc).find_by(spree_taxonomies: { name: Spree.t(:taxonomy_categories_name) })
+      @category ||= taxons.joins(:taxonomy).
+                    join_translation_table(Taxonomy).
+                    order(depth: :desc).
+                    find_by(Taxonomy.translation_table_alias => { name: Spree.t(:taxonomy_categories_name) })
     end
 
     def taxons_for_store(store)

@@ -86,12 +86,11 @@ module Spree
 
       def by_name(taxons)
         return taxons unless name?
+
         taxon_name = name
 
-        # i18n scope doesn't automatically get set here (mobility gem bug?) set it explicitly
-        taxons.i18n do
-          name.matches("%#{taxon_name}%")
-        end
+        # i18n mobility scope doesn't automatically get set for query blocks (Mobility issue #599) - set it explicitly
+        taxons.i18n { name.matches("%#{taxon_name}%") }
       end
     end
   end

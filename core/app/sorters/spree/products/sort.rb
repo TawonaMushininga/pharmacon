@@ -49,18 +49,25 @@ module Spree
         sort.detect { |s| s[0] == field }
       end
 
-      # Add translatable fields to SELECT statement to avoid InvalidColumnReference error (Mobility bug workaround)
+      # Add translatable fields to SELECT statement to avoid InvalidColumnReference error (workaround for Mobility issue #596)
       def select_translatable_fields(scope)
-        translatable_sortable_fields = []
-        Product.translatable_fields.each do |field|
-          translatable_sortable_fields << field if sort_by?(field.to_s)
+        translatable_fields = translatable_sortable_fields
+        return scope if translatable_fields.empty?
+
+        # if sorting by 'sku' or 'price', spree_products.* is already included in SELECT statement
+        if sort_by?('sku') || sort_by?('price')
+          scope.i18n.select(*translatable_fields)
+        else
+          scope.i18n.select("#{Product.table_name}.*").select(*translatable_fields)
         end
+      end
 
-        return scope unless translatable_sortable_fields.any?
-
-        sql_fields = translatable_sortable_fields.map {|field| "#{Product.translation_table_alias}.#{field}" }
-                                                 .join(', ')
-        scope.i18n.select("#{Product.table_name}.*, #{sql_fields}")
+      def translatable_sortable_fields
+        fields = []
+        Product.translatable_fields.each do |field|
+          fields << field if sort_by?(field.to_s)
+        end
+        fields
       end
     end
   end
